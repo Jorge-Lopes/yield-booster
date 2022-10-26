@@ -73,6 +73,8 @@ contract AlluoYieldResolver is AccessControlUpgradeable {
             address vault = vaults.at(i);
             address asset = IAlluoVault(vault).asset();
 
+            console.log("vault= ", vault);
+            console.log("asset= ", asset);
             console.log("Balance= ", IERC20Upgradeable(asset).balanceOf(vault));
             console.log("timestamp= ", block.timestamp);
             console.log("vaultLastStake= ", vaultLastStake[vault] + stakeTime);
@@ -102,6 +104,12 @@ contract AlluoYieldResolver is AccessControlUpgradeable {
     {
         for (uint256 i; i < boostPools.length(); i++) {
             address boostPool = boostPools.at(i);
+
+            console.log("boostPool= ", boostPool);
+            console.log("timestamp= ", block.timestamp);
+            console.log("boostLastFarm[boostPool]= ", boostLastFarm[boostPool]);
+            console.log("gaz= ", currentGasPriceAcceptable());
+
             if (
                 block.timestamp > boostLastFarm[boostPool] + farmTime &&
                 currentGasPriceAcceptable()
