@@ -18,7 +18,42 @@ describe("Alluo Yield Resolver Tests", function () {
     return await ethers.getSigner(address);
   }
 
+  async function skipDays(d: number) {
+    ethers.provider.send("evm_increaseTime", [d * 86400]);
+    ethers.provider.send("evm_mine", []);
+  }
+
+  async function grantRoleToPool() {
+    const pool = await ethers.getContractAt(
+      "AlluoVaultPool",
+      "0x470e486acA0e215C925ddcc3A9D446735AabB714"
+    );
+
+    await pool
+      .connect(gnosis)
+      .grantRole(
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        resolver.address
+      );
+
+    console.log(
+      "AlluoVaultPool assigned DEFAULT_ADMIN_ROLE to Resolver address"
+    );
+  }
+
+  async function getTxFromExecPayload(txCheckerPayload: string) {
+    const data = txCheckerPayload;
+    const tx = {
+      from: signers[0].address,
+      to: resolver.address,
+      data: data,
+    };
+    return tx;
+  }
+
   before(async () => {
+    signers = await ethers.getSigners();
+    
     await network.provider.request({
       method: "hardhat_reset",
       params: [
@@ -32,12 +67,10 @@ describe("Alluo Yield Resolver Tests", function () {
         },
       ],
     });
-
-    signers = await ethers.getSigners();
   });
 
   beforeEach(async () => {
-    let gnosis = await getImpersonatedSigner(
+    gnosis = await getImpersonatedSigner(
       "0x1F020A4943EB57cd3b2213A66b355CB662Ea43C3"
     );
     await signers[0].sendTransaction({
@@ -66,13 +99,17 @@ describe("Alluo Yield Resolver Tests", function () {
       alluoPool,
       gnosis.address
     );
+
+    await resolver
+      .connect(gnosis)
+      .grantRole(
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        signers[0].address
+      );
   });
 
   describe("Daily Staking tests", function () {
-    it("Verify conditions and pass", async function () {
-      // const tx1 = await resolver.stakingChecker();
-      // console.log(tx1);
-    });
+    it("Verify conditions and pass", async function () {});
 
     it("Verify conditions and fail", async function () {});
 
@@ -82,35 +119,55 @@ describe("Alluo Yield Resolver Tests", function () {
   });
 
   describe("Weekly Farming tests", function () {
-    it("Verify conditions and pass", async function () {
-      const farmingChecker1 = await resolver.farmingChecker();
-      expect(farmingChecker1.canExec).equal(true);
+    it("Verify Checker conditions and return true", async function () {
+      // grant DEFAULT_ADMIN_ROLE of vaultPool to Resolver contract
+      await grantRoleToPool();
+
+      // verify Checker conditions returns true
+      const tx1checker = await resolver.farmingChecker();
+      expect(tx1checker.canExec).equal(true);
+
+      // stake rewards
+      const data = tx1checker.execPayload;
+      const tx = await getTxFromExecPayload(data);
+      await signers[0].sendTransaction(tx);
     });
 
-    it("Verify conditions and fail", async function () {});
+    it("Verify Checker conditions and fail on gas", async function () {
+      // verify Checker conditions returns true
+      const tx1checker = await resolver.farmingChecker();
+      expect(tx1checker.canExec).equal(true);
 
-    it("farmFunds ... timestamp", async function () {
-      let gnosis = await getImpersonatedSigner(
-        "0x1F020A4943EB57cd3b2213A66b355CB662Ea43C3"
-      );
+      // set maxGas bellow chainlinkFastGas
+      await resolver.connect(gnosis).setMaxGas(1);
 
-      const pool = await ethers.getContractAt(
-        "AlluoVaultPool",
-        "0x470e486acA0e215C925ddcc3A9D446735AabB714"
-      );
-      const txGrantRole = await pool
-        .connect(gnosis)
-        .grantRole(
-          "0x0000000000000000000000000000000000000000000000000000000000000000",
-          resolver.address
-        );
-      console.log("txGrantRole= ", txGrantRole);
+      // verify Checker conditions returns false
+      const tx2checker = await resolver.farmingChecker();
+      expect(tx2checker.canExec).equal(false);
+    });
 
-      const tx1farmingChecker = await resolver.farmingChecker();
-      expect(tx1farmingChecker.canExec).equal(true);
+    it("Farm funds and verify that checker conditions will fail by 7 days", async function () {
+      // grant DEFAULT_ADMIN_ROLE of vaultPool to Resolver contract
+      await grantRoleToPool();
 
-      const txFarm = await resolver.connect(gnosis).farmFunds(0);
-      console.log(txFarm);
+      // verify Checker conditions returns true
+      const tx1checker = await resolver.farmingChecker();
+      expect(tx1checker.canExec).equal(true);
+
+      // stake rewards
+      const data = tx1checker.execPayload;
+      const tx = await getTxFromExecPayload(data);
+      await signers[0].sendTransaction(tx);
+
+      // wait 6 days verify that checker conditions returns false
+      await skipDays(6);
+      const tx2checker = await resolver.farmingChecker();
+      expect(tx2checker.canExec).equal(false);
+
+      // wait 7 days and verify again that Checker conditions returns true
+      await skipDays(7);
+      const tx3checker = await resolver.farmingChecker();
+      expect(tx3checker.canExec).equal(true);
     });
   });
 });
