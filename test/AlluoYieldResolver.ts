@@ -1,14 +1,21 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
-import { parseEther } from "ethers/lib/utils";
+import { parseEther, parseUnits } from "ethers/lib/utils";
 import { ethers, network } from "hardhat";
 import { before } from "mocha";
-import { AlluoYieldResolver } from "../typechain";
+import {
+  AlluoYieldResolver,
+  IERC20MetadataUpgradeable,
+  Exchange,
+} from "../typechain";
 
 describe("Alluo Yield Resolver Tests", function () {
   let gnosis: SignerWithAddress;
   let signers: SignerWithAddress[];
   let resolver: AlluoYieldResolver;
+  let exchange: Exchange;
+  let usdc: IERC20MetadataUpgradeable;
+  const ZERO_ADDR = ethers.constants.AddressZero;
 
   async function getImpersonatedSigner(
     address: string
@@ -35,10 +42,6 @@ describe("Alluo Yield Resolver Tests", function () {
         "0x0000000000000000000000000000000000000000000000000000000000000000",
         resolver.address
       );
-
-    console.log(
-      "AlluoVaultPool assigned DEFAULT_ADMIN_ROLE to Resolver address"
-    );
   }
 
   async function getTxFromExecPayload(txCheckerPayload: string) {
@@ -51,9 +54,17 @@ describe("Alluo Yield Resolver Tests", function () {
     return tx;
   }
 
+  async function depositUSDCtoAlluoVault(vaultAddress: string) {
+    const vault = await ethers.getContractAt(
+      "AlluoVaultUpgradeable",
+      vaultAddress
+    );
+    const usdcBalance = parseUnits("100", 6);
+    await usdc.approve(vault.address, ethers.constants.MaxUint256);
+    await vault.depositWithoutLP(usdcBalance, usdc.address);
+  }
+
   before(async () => {
-    signers = await ethers.getSigners();
-    
     await network.provider.request({
       method: "hardhat_reset",
       params: [
@@ -66,6 +77,24 @@ describe("Alluo Yield Resolver Tests", function () {
           },
         },
       ],
+    });
+  });
+
+  before(async () => {
+    signers = await ethers.getSigners();
+
+    exchange = await ethers.getContractAt(
+      "Exchange",
+      "0x29c66CF57a03d41Cfe6d9ecB6883aa0E2AbA21Ec"
+    );
+    usdc = await ethers.getContractAt(
+      "IERC20MetadataUpgradeable",
+      "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    );
+
+    const value = parseEther("2000.0");
+    await exchange.exchange(ZERO_ADDR, usdc.address, value, 0, {
+      value: value,
     });
   });
 
@@ -109,65 +138,99 @@ describe("Alluo Yield Resolver Tests", function () {
   });
 
   describe("Daily Staking tests", function () {
-    it("Verify conditions and pass", async function () {});
+    it("Verify checker conditions and return true", async function () {
+      const vaultAddress = "0x2D182Fc86Cd4C38D9FE94566251A6aF1A85F784b";
+      await depositUSDCtoAlluoVault(vaultAddress);
 
-    it("Verify conditions and fail", async function () {});
+      expect((await resolver.stakingChecker()).canExec).equal(true);
 
-    it("stakeFunds ... timestamp", async function () {});
+      const data = (await resolver.stakingChecker()).execPayload;
+      const tx = await getTxFromExecPayload(data);
+      await signers[0].sendTransaction(tx);
+    });
 
-    it("stakeFunds ... balance", async function () {});
+    it("Verify checker conditions and fail on balance", async function () {
+      expect((await resolver.stakingChecker()).canExec).equal(false);
+    });
+
+    it("Verify checker conditions and fail on gas", async function () {
+      const vaultAddress = "0x2D182Fc86Cd4C38D9FE94566251A6aF1A85F784b";
+      await depositUSDCtoAlluoVault(vaultAddress);
+
+      expect((await resolver.stakingChecker()).canExec).equal(true);
+
+      await resolver.connect(gnosis).setMaxGas(1);
+      expect((await resolver.stakingChecker()).canExec).equal(false);
+    });
+
+    it("Stake funds and verify checker conditions on timestamp", async function () {
+      const vaultAddress = "0x2D182Fc86Cd4C38D9FE94566251A6aF1A85F784b";
+      await depositUSDCtoAlluoVault(vaultAddress);
+
+      expect((await resolver.stakingChecker()).canExec).equal(true);
+
+      const data = (await resolver.stakingChecker()).execPayload;
+      const tx = await getTxFromExecPayload(data);
+      await signers[0].sendTransaction(tx);
+
+      await depositUSDCtoAlluoVault(vaultAddress);
+      expect((await resolver.stakingChecker()).canExec).equal(false);
+
+      await skipDays(1);
+      expect((await resolver.stakingChecker()).canExec).equal(true);
+    });
+
+    it("Stake funds and verify checker conditions on balance", async function () {
+      const vaultAddress = "0x2D182Fc86Cd4C38D9FE94566251A6aF1A85F784b";
+      await depositUSDCtoAlluoVault(vaultAddress);
+
+      expect((await resolver.stakingChecker()).canExec).equal(true);
+
+      const data = (await resolver.stakingChecker()).execPayload;
+      const tx = await getTxFromExecPayload(data);
+      await signers[0].sendTransaction(tx);
+
+      await skipDays(0.5);
+      expect((await resolver.stakingChecker()).canExec).equal(false);
+
+      await skipDays(0.5);
+      await depositUSDCtoAlluoVault(vaultAddress);
+      expect((await resolver.stakingChecker()).canExec).equal(true);
+    });
   });
 
   describe("Weekly Farming tests", function () {
-    it("Verify Checker conditions and return true", async function () {
-      // grant DEFAULT_ADMIN_ROLE of vaultPool to Resolver contract
+    it("Verify checker conditions and return true", async function () {
       await grantRoleToPool();
 
-      // verify Checker conditions returns true
-      const tx1checker = await resolver.farmingChecker();
-      expect(tx1checker.canExec).equal(true);
+      expect((await resolver.farmingChecker()).canExec).equal(true);
 
-      // stake rewards
-      const data = tx1checker.execPayload;
+      const data = (await resolver.farmingChecker()).execPayload;
       const tx = await getTxFromExecPayload(data);
       await signers[0].sendTransaction(tx);
     });
 
-    it("Verify Checker conditions and fail on gas", async function () {
-      // verify Checker conditions returns true
-      const tx1checker = await resolver.farmingChecker();
-      expect(tx1checker.canExec).equal(true);
+    it("Verify checker conditions and fail on gas", async function () {
+      expect((await resolver.farmingChecker()).canExec).equal(true);
 
-      // set maxGas bellow chainlinkFastGas
       await resolver.connect(gnosis).setMaxGas(1);
-
-      // verify Checker conditions returns false
-      const tx2checker = await resolver.farmingChecker();
-      expect(tx2checker.canExec).equal(false);
+      expect((await resolver.farmingChecker()).canExec).equal(false);
     });
 
-    it("Farm funds and verify that checker conditions will fail by 7 days", async function () {
-      // grant DEFAULT_ADMIN_ROLE of vaultPool to Resolver contract
+    it("Farm funds and verify checker conditions on timestamp", async function () {
       await grantRoleToPool();
 
-      // verify Checker conditions returns true
-      const tx1checker = await resolver.farmingChecker();
-      expect(tx1checker.canExec).equal(true);
+      expect((await resolver.farmingChecker()).canExec).equal(true);
 
-      // stake rewards
-      const data = tx1checker.execPayload;
+      const data = (await resolver.farmingChecker()).execPayload;
       const tx = await getTxFromExecPayload(data);
       await signers[0].sendTransaction(tx);
 
-      // wait 6 days verify that checker conditions returns false
       await skipDays(6);
-      const tx2checker = await resolver.farmingChecker();
-      expect(tx2checker.canExec).equal(false);
+      expect((await resolver.farmingChecker()).canExec).equal(false);
 
-      // wait 7 days and verify again that Checker conditions returns true
-      await skipDays(7);
-      const tx3checker = await resolver.farmingChecker();
-      expect(tx3checker.canExec).equal(true);
+      await skipDays(1);
+      expect((await resolver.farmingChecker()).canExec).equal(true);
     });
   });
 });
