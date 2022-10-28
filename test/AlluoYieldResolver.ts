@@ -153,13 +153,13 @@ describe("Alluo Yield Resolver Tests", function () {
       expect((await resolver.stakingChecker()).canExec).equal(false);
     });
 
-    it("Verify checker conditions and fail on gas", async function () {
+    it.only("Verify checker conditions and fail on gas", async function () {
       const vaultAddress = "0x2D182Fc86Cd4C38D9FE94566251A6aF1A85F784b";
       await depositUSDCtoAlluoVault(vaultAddress);
 
       expect((await resolver.stakingChecker()).canExec).equal(true);
 
-      await resolver.connect(gnosis).setMaxGas(1);
+      await resolver.connect(gnosis).setMaxGas(12 * 10 ** 9);
       expect((await resolver.stakingChecker()).canExec).equal(false);
     });
 
@@ -213,7 +213,7 @@ describe("Alluo Yield Resolver Tests", function () {
     it("Verify checker conditions and fail on gas", async function () {
       expect((await resolver.farmingChecker()).canExec).equal(true);
 
-      await resolver.connect(gnosis).setMaxGas(1);
+      await resolver.connect(gnosis).setMaxGas(12 * 10 ** 9);
       expect((await resolver.farmingChecker()).canExec).equal(false);
     });
 
