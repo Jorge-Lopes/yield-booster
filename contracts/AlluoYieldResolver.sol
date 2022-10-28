@@ -7,7 +7,6 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 
 import "./interfaces/IAlluoVault.sol";
 import "./interfaces/IAlluoPool.sol";
-import "hardhat/console.sol";
 
 interface IFastGas {
     function latestRoundData()
